@@ -1,0 +1,1 @@
+# Pure Python Standard Library — ไม่จำเป็นต้องติดตั้งโมดูลภายนอก

@@ -1,0 +1,12 @@
+version: '3.8'
+
+services:
+  procurement-system:
+    build: .
+    container_name: procurement_app
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./procurement.db:/app/procurement.db
+      - ./benchmark_prices.xlsx:/app/benchmark_prices.xlsx
+    restart: unless-stopped
