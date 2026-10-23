@@ -17,7 +17,7 @@ from database import (
     delete_benchmark_item, delete_daily_purchase_item,
     get_daily_purchase_spec, update_daily_purchases,
     get_365_days_summary, get_bill_settings, update_bill_settings,
-    clear_month_purchases, clear_day_purchases, update_daily_metadata, get_connection, DB_PATH
+    clear_month_purchases, clear_day_purchases, update_daily_metadata, reset_all_data_365, get_connection, DB_PATH
 )
 from benchmark import init_benchmark_excel, DEFAULT_EXCEL_PATH
 from scheduler import generate_365_days_schedule, apply_template_to_days, PROCUREMENT_TEMPLATES
@@ -365,6 +365,14 @@ class ProcurementHandler(BaseHTTPRequestHandler):
             except ValueError as e:
                 self._send_json({"error": str(e)}, 400)
 
+        # รีเซ็ตข้อมูลทั้งหมด 365 วัน (สำหรับเริ่มปีใหม่)
+        elif path == "/api/reset/all":
+            try:
+                res = reset_all_data_365()
+                self._send_json({"success": True, "result": res})
+            except Exception as e:
+                self._send_json({"error": str(e)}, 500)
+
         # สร้างตาราง 365 วันใหม่ทั้งหมด
         elif path == "/api/schedule/regenerate":
             start = body.get("start_date", "2026-01-01")
@@ -549,6 +557,8 @@ body {
   font-family: 'Kanit', sans-serif;
 }
 .topbar-btn:hover { background: rgba(255,255,255,0.26); }
+.topbar-btn-danger { background: rgba(220,50,50,0.55) !important; border-color: rgba(255,100,100,0.5) !important; }
+.topbar-btn-danger:hover { background: rgba(220,50,50,0.80) !important; }
 
 /* โครงสร้างหน้า */
 .main-layout {
@@ -1233,8 +1243,8 @@ body {
     <button class="topbar-btn" onclick="downloadBenchmark()">
       <svg class="ic"><use href="#ic-chart"/></svg> ดาวน์โหลด Excel ราคากลาง
     </button>
-    <button class="topbar-btn" onclick="regenerateSchedule()">
-      <svg class="ic"><use href="#ic-refresh"/></svg> สร้างตาราง 365 วันใหม่
+    <button class="topbar-btn topbar-btn-danger" onclick="resetAll365()">
+      <svg class="ic"><use href="#ic-refresh"/></svg> รีเซ็ตข้อมูลทั้งหมด 365 วัน (เริ่มปีใหม่)
     </button>
     <button class="topbar-btn" onclick="syncBenchmark()">
       <svg class="ic"><use href="#ic-zap"/></svg> ซิงค์ราคาล่าสุด
@@ -2912,6 +2922,27 @@ async function uploadBenchmarkExcel(inputEl, directFile) {
   } finally {
     if (progressEl) progressEl.style.display = 'none';
     if (inputEl) inputEl.value = '';
+  }
+}
+
+async function resetAll365() {
+  const ok = await showPopupConfirm({
+    title: '⚠️ รีเซ็ตข้อมูลทั้งหมด 365 วัน',
+    message: 'การดำเนินการนี้จะ:\n\n• ลบรายการจัดซื้อทั้งหมดออก\n• ล้างชื่อเมนูของทุกวัน (365 วัน)\n\nใช้สำหรับเริ่มต้นปีใหม่เท่านั้น\nข้อมูลที่ลบจะไม่สามารถกู้คืนได้!\n\nต้องการดำเนินการต่อใช่หรือไม่?',
+    confirmText: 'รีเซ็ตทั้งหมด',
+    cancelText: 'ยกเลิก',
+    isDanger: true
+  });
+  if (!ok) return;
+  showToast('กำลังรีเซ็ตข้อมูลทั้งหมด 365 วัน...', 'info');
+  try {
+    const res = await api('/api/reset/all', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+    showToast('รีเซ็ตข้อมูลทั้งหมด 365 วันเรียบร้อยแล้ว!', 'success');
+    await loadSummary();
+    renderCalendar();
+    if (currentDay) loadDay(currentDay);
+  } catch(err) {
+    showToast('เกิดข้อผิดพลาด: ' + err.message, 'error');
   }
 }
 

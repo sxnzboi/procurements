@@ -265,6 +265,18 @@ def sb_clear_day_purchases(day_number, clear_theme=False):
         _api_request("daily_metadata", method="PATCH", data={"theme": "", "notes": ""}, params={"day_number": f"eq.{day_number}"})
     return deleted_count
 
+def sb_reset_all_data_365():
+    """Reset all 365 days data in Supabase: delete purchases and clear daily themes/notes."""
+    try:
+        _api_request("daily_purchases", method="DELETE", params={"id": "gt.0"})
+    except Exception as e:
+        print(f"[Supabase] delete all daily_purchases error: {e}")
+    try:
+        _api_request("daily_metadata", method="PATCH", data={"theme": "", "notes": ""}, params={"day_number": "gt.0"})
+    except Exception as e:
+        print(f"[Supabase] reset daily_metadata error: {e}")
+    return True
+
 def sb_update_daily_metadata(day_number, theme=None, notes=None):
     payload = {}
     if theme is not None:
@@ -393,7 +405,7 @@ def sb_get_bill_settings():
 def sb_update_bill_settings(settings_dict):
     records = []
     for k, v in settings_dict.items():
-        if k in DEFAULT_BILL_SETTINGS or k.startswith("bill_") or k.startswith("order_") or k.startswith("deadline_"):
+        if k in DEFAULT_BILL_SETTINGS or k.startswith("bill_") or k.startswith("order_") or k.startswith("deadline_") or k.startswith("cond_"):
             records.append({"key": k, "value": str(v).strip()})
     if records:
         _api_request("bill_settings", method="POST", data=records, extra_headers={"Prefer": "resolution=merge-duplicates"})

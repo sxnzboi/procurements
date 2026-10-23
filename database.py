@@ -561,7 +561,17 @@ DEFAULT_BILL_SETTINGS = {
     "buyer_name": "นางสาวรานีซะ หะมิ",
     "buyer_position": "หัวหน้าเจ้าหน้าที่",
     "receiver_name": "นางสาวทัศนีย์ สุรเกียรติ",
-    "receiver_position": "เจ้าของร้าน"
+    "receiver_position": "เจ้าของร้าน",
+    # เงื่อนไขการสั่งซื้อ (หน้า 2)
+    "cond_delivery_days": "1",
+    "cond_deadline_text": "",
+    "cond_location": "",
+    "cond_warranty": "-",
+    "cond_penalty_rate": "0.2",
+    "cond_penalty_min": "100.00",
+    "cond_item_6": "ส่วนราชการสงวนสิทธิ์ที่จะไม่รับมอบถ้าปรากฏว่าสินค้านั้นมีลักษณะไม่ตรงตามรายการที่ระบุไว้ในใบสั่งซื้อ กรณีนี้ผู้รับจ้างจะต้องดำเนินการเปลี่ยนใหม่ให้ถูกต้องตามใบสั่งซื้อทุกประการ",
+    "cond_item_7": "ผู้กรณีงานจ้าง ผู้รับจะต้องไม่เอางานทั้งหมดหรือแต่บางส่วนแห่งสัญญานี้ไปจ้างช่วงอีกทอดหนึ่ง เว้นแต่การจ้างช่วงงานแต่บางส่วนที่ได้รับอนุญาตเป็นหนังสือจากผู้ว่าจ้างแล้ว การที่ผู้ว่าจ้างได้อนุญาตให้จ้างช่วงงานแต่บางส่วนดังกล่าวนั้น ไม่เป็นเหตุให้ผู้รับจ้างหลุดพ้นจากความรับผิดหรือพันธะหน้าที่ตามสัญญานี้ และผู้รับจ้างจะยังคงต้องรับผิดในความผิดกรณีผู้รับจ้างไปจ้างช่วงงานแต่บางส่วนโดยฝ่าฝืนความในวรรคหนึ่ง ผู้รับจ้างจะต้องชำระค่าปรับให้แก่ผู้ว่าจ้างเป็นจำนวนในอัตราร้อยละ 10 (สิบ) ของวงเงินของงานที่จ้างช่วงตามสัญญา ทั้งนี้ ไม่ตัดสิทธิผู้ว่าจ้างในการบอกเลิกสัญญา",
+    "cond_item_8": "การประเมินผลการปฏิบัติงานของผู้ประกอบการ หน่วยงานของรัฐสามารถนำผลการปฏิบัติงานแล้วเสร็จตามสัญญาหรือข้อตกลงของคู่สัญญาเพื่อนำมาประเมินผลการปฏิบัติงานของผู้ประกอบการ"
 }
 
 def get_bill_settings(db_path=DB_PATH):
@@ -597,7 +607,7 @@ def update_bill_settings(settings_dict, db_path=DB_PATH):
     cur = conn.cursor()
     cur.execute("CREATE TABLE IF NOT EXISTS bill_settings (key TEXT PRIMARY KEY, value TEXT)")
     for k, v in settings_dict.items():
-        if k in DEFAULT_BILL_SETTINGS or k.startswith("bill_") or k.startswith("order_") or k.startswith("deadline_"):
+        if k in DEFAULT_BILL_SETTINGS or k.startswith("bill_") or k.startswith("order_") or k.startswith("deadline_") or k.startswith("cond_"):
             cur.execute("""
                 INSERT INTO bill_settings (key, value) VALUES (?, ?)
                 ON CONFLICT(key) DO UPDATE SET value = excluded.value
@@ -664,6 +674,64 @@ def clear_day_purchases(day_number, clear_theme=False, db_path=DB_PATH):
     conn.commit()
     conn.close()
     return sb_deleted if sb_deleted is not None else deleted
+
+def reset_all_data_365(db_path=DB_PATH):
+    """
+    Reset all 365 days data:
+    - Delete all records in daily_purchases
+    - Clear theme and notes in daily_metadata for all 365 days
+    - Ensure framework of 365 days exists
+    """
+    sb_result = None
+    if USE_SUPABASE and supabase_db and supabase_db.is_supabase_configured():
+        try:
+            sb_result = supabase_db.sb_reset_all_data_365()
+        except Exception as e:
+            print(f"[Supabase Fallback] reset_all_data_365: {e}")
+
+    conn = get_connection(db_path)
+    cur = conn.cursor()
+    cur.execute("DELETE FROM daily_purchases")
+    deleted_purchases = cur.rowcount
+    cur.execute("UPDATE daily_metadata SET theme = '', notes = '', updated_at = CURRENT_TIMESTAMP")
+    updated_days = cur.rowcount
+    conn.commit()
+    conn.close()
+    init_empty_365_days(db_path)
+    return {
+        "deleted_purchases": deleted_purchases,
+        "updated_days": updated_days,
+        "supabase": sb_result
+    }
+
+def reset_all_data_365(db_path=DB_PATH):
+    """
+    Reset all 365 days data:
+    - Delete all records in daily_purchases
+    - Clear theme and notes in daily_metadata for all 365 days
+    - Ensure framework of 365 days exists
+    """
+    sb_result = None
+    if USE_SUPABASE and supabase_db and supabase_db.is_supabase_configured():
+        try:
+            sb_result = supabase_db.sb_reset_all_data_365()
+        except Exception as e:
+            print(f"[Supabase Fallback] reset_all_data_365: {e}")
+
+    conn = get_connection(db_path)
+    cur = conn.cursor()
+    cur.execute("DELETE FROM daily_purchases")
+    deleted_purchases = cur.rowcount
+    cur.execute("UPDATE daily_metadata SET theme = '', notes = '', updated_at = CURRENT_TIMESTAMP")
+    updated_days = cur.rowcount
+    conn.commit()
+    conn.close()
+    init_empty_365_days(db_path)
+    return {
+        "deleted_purchases": deleted_purchases,
+        "updated_days": updated_days,
+        "supabase": sb_result
+    }
 
 def update_daily_metadata(day_number, theme=None, notes=None, db_path=DB_PATH):
     """

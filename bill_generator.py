@@ -68,6 +68,28 @@ def baht_text(num):
         
     return f"({b_txt}{s_txt})"
 
+def _extract_conditions(settings, default_deadline, dept_info, day_num_key=None):
+    cond_deadline = ""
+    if day_num_key:
+        cond_deadline = settings.get(f"cond_deadline_day_{day_num_key}", "")
+    if not cond_deadline:
+        cond_deadline = settings.get("cond_deadline_text", "") or default_deadline
+
+    default_location = f"{dept_info.get('dept_name', '')} {dept_info.get('dept_agency', '')} {dept_info.get('dept_address_line1', '')} {dept_info.get('dept_address_line2', '')}".strip()
+    cond_location = settings.get("cond_location") or default_location
+
+    return {
+        "cond_delivery_days": settings.get("cond_delivery_days", "1"),
+        "cond_deadline_text": cond_deadline,
+        "cond_location": cond_location,
+        "cond_warranty": settings.get("cond_warranty", "-"),
+        "cond_penalty_rate": settings.get("cond_penalty_rate", "0.2"),
+        "cond_penalty_min": settings.get("cond_penalty_min", "100.00"),
+        "cond_item_6": settings.get("cond_item_6", "ส่วนราชการสงวนสิทธิ์ที่จะไม่รับมอบถ้าปรากฏว่าสินค้านั้นมีลักษณะไม่ตรงตามรายการที่ระบุไว้ในใบสั่งซื้อ กรณีนี้ผู้รับจ้างจะต้องดำเนินการเปลี่ยนใหม่ให้ถูกต้องตามใบสั่งซื้อทุกประการ"),
+        "cond_item_7": settings.get("cond_item_7", "ผู้กรณีงานจ้าง ผู้รับจะต้องไม่เอางานทั้งหมดหรือแต่บางส่วนแห่งสัญญานี้ไปจ้างช่วงอีกทอดหนึ่ง เว้นแต่การจ้างช่วงงานแต่บางส่วนที่ได้รับอนุญาตเป็นหนังสือจากผู้ว่าจ้างแล้ว การที่ผู้ว่าจ้างได้อนุญาตให้จ้างช่วงงานแต่บางส่วนดังกล่าวนั้น ไม่เป็นเหตุให้ผู้รับจ้างหลุดพ้นจากความรับผิดหรือพันธะหน้าที่ตามสัญญานี้ และผู้รับจ้างจะยังคงต้องรับผิดในความผิดกรณีผู้รับจ้างไปจ้างช่วงงานแต่บางส่วนโดยฝ่าฝืนความในวรรคหนึ่ง ผู้รับจ้างจะต้องชำระค่าปรับให้แก่ผู้ว่าจ้างเป็นจำนวนในอัตราร้อยละ 10 (สิบ) ของวงเงินของงานที่จ้างช่วงตามสัญญา ทั้งนี้ ไม่ตัดสิทธิผู้ว่าจ้างในการบอกเลิกสัญญา"),
+        "cond_item_8": settings.get("cond_item_8", "การประเมินผลการปฏิบัติงานของผู้ประกอบการ หน่วยงานของรัฐสามารถนำผลการปฏิบัติงานแล้วเสร็จตามสัญญาหรือข้อตกลงของคู่สัญญาเพื่อนำมาประเมินผลการปฏิบัติงานของผู้ประกอบการ")
+    }
+
 def get_bill_data_for_day(day_number, db_path=DB_PATH):
     """Retrieve full bill data for a specific day."""
     spec = get_daily_purchase_spec(day_number, db_path)
@@ -97,7 +119,7 @@ def get_bill_data_for_day(day_number, db_path=DB_PATH):
     subtotal = spec["total_cost"]
     baht_wording = baht_text(subtotal)
 
-    return {
+    res = {
         "bill_number": bill_no,
         "day_number": day_number,
         "fiscal_year": settings.get("fiscal_year", "2569"),
@@ -133,6 +155,8 @@ def get_bill_data_for_day(day_number, db_path=DB_PATH):
         "receiver_name": settings.get("receiver_name", "นางสาวทัศนีย์ สุรเกียรติ"),
         "receiver_position": settings.get("receiver_position", "เจ้าของร้าน")
     }
+    res.update(_extract_conditions(settings, deadline_date_thai, res, day_num_key=day_number))
+    return res
 
 def get_bill_data_for_month(month_str, db_path=DB_PATH):
     """
@@ -190,7 +214,7 @@ def get_bill_data_for_month(month_str, db_path=DB_PATH):
     b_year     = start_dt.year + 543
     month_label = f"{month_name} {b_year}"
 
-    return {
+    res = {
         "bill_number":        f"เดือน{month_label}/{bill_year}",
         "day_number":         f"{start_day}-{end_day}",
         "fiscal_year":        settings.get("fiscal_year", "2569"),
@@ -228,6 +252,8 @@ def get_bill_data_for_month(month_str, db_path=DB_PATH):
         "receiver_name":       settings.get("receiver_name", "นางสาวทัศนีย์ สุรเกียรติ"),
         "receiver_position":   settings.get("receiver_position", "เจ้าของร้าน"),
     }
+    res.update(_extract_conditions(settings, to_thai_date(start_dt, False), res))
+    return res
 
 
 def get_bill_data_for_range(start_day, end_day, db_path=DB_PATH):
@@ -264,7 +290,7 @@ def get_bill_data_for_range(start_day, end_day, db_path=DB_PATH):
     settings = get_bill_settings(db_path)
     bill_year = settings.get("bill_year", "2570")
 
-    return {
+    res = {
         "bill_number": f"{start_day}-{end_day}/{bill_year}",
         "day_number": f"{start_day}-{end_day}",
         "fiscal_year": settings.get("fiscal_year", "2569"),
@@ -300,6 +326,8 @@ def get_bill_data_for_range(start_day, end_day, db_path=DB_PATH):
         "receiver_name": settings.get("receiver_name", "นางสาวทัศนีย์ สุรเกียรติ"),
         "receiver_position": settings.get("receiver_position", "เจ้าของร้าน")
     }
+    res.update(_extract_conditions(settings, to_thai_date(start_dt, False), res))
+    return res
 
 def render_printable_bill_html(bill_data):
     """
@@ -692,6 +720,22 @@ def render_printable_bill_html(bill_data):
     border-color: #2563eb;
     box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.15);
   }}
+  .field-group textarea {{
+    width: 100%;
+    box-sizing: border-box;
+    padding: 7px 10px;
+    border: 1px solid #d1d5db;
+    border-radius: 6px;
+    font-size: 13px;
+    outline: none;
+    font-family: inherit;
+    resize: vertical;
+    line-height: 1.4;
+  }}
+  .field-group textarea:focus {{
+    border-color: #2563eb;
+    box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.15);
+  }}
 
   /* Modern Beautiful Popup Modal */
   .sw-popup-backdrop {{
@@ -928,6 +972,24 @@ def render_printable_bill_html(bill_data):
     padding-left: 1.8em;
     text-indent: -1.8em;
   }}
+  .cond-edit-span {{
+    outline: none;
+    cursor: text;
+    border-radius: 3px;
+    padding: 0 2px;
+    transition: background 0.15s, box-shadow 0.15s;
+    border-bottom: 1px dashed rgba(37, 99, 235, 0.4);
+  }}
+  .cond-edit-span:hover {{
+    background: #eff6ff;
+    box-shadow: 0 0 0 1px #93c5fd;
+    border-bottom-color: #2563eb;
+  }}
+  .cond-edit-span:focus {{
+    background: #ffffff;
+    box-shadow: 0 0 0 2px #2563eb;
+    border-bottom-color: transparent;
+  }}
   .signatures-wrap {{
     margin-top: 40px;
     width: 100%;
@@ -947,8 +1009,13 @@ def render_printable_bill_html(bill_data):
       background: #ffffff;
       padding: 0;
     }}
-    .no-print-bar {{
+    .no-print-bar, .no-print {{
       display: none !important;
+    }}
+    .cond-edit-span {{
+      border-bottom: none !important;
+      background: transparent !important;
+      box-shadow: none !important;
     }}
     .page {{
       box-shadow: none;
@@ -1021,17 +1088,22 @@ def render_printable_bill_html(bill_data):
 <div class="page page-break">
   <div class="page-num">- {len(page_chunks) + 1} -</div>
 
-  <div class="conditions-title">อยู่ภายใต้เงื่อนไขต่อไปนี้</div>
+  <div class="conditions-title" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+    <span>อยู่ภายใต้เงื่อนไขต่อไปนี้</span>
+    <button onclick="openBillSettingsModal('sec-conditions')" class="btn btn-edit no-print" style="padding: 3px 10px; font-size: 13px;">
+      <svg class="ic"><use href="#ic-edit"/></svg> แก้ไขเงื่อนไข
+    </button>
+  </div>
 
   <ul class="condition-list">
-    <li>1. กำหนดส่งมอบภายใน <strong>1</strong> วัน นับถัดจากวันที่ผู้ขายได้รับใบสั่งซื้อ</li>
-    <li>2. ครบกำหนดส่งมอบวันที่ <span style="color: red; font-weight: bold;">{bill_data['deadline_date_thai']}</span></li>
-    <li>3. สถานที่ส่งมอบ {bill_data['dept_name']} {bill_data['dept_agency']} {bill_data['dept_address_line1']} {bill_data['dept_address_line2']}</li>
-    <li>4. ระยะเวลารับประกัน -</li>
-    <li>5. สงวนสิทธิ์ค่าปรับกรณีส่งมอบเกินกำหนด โดยคิดค่าปรับเป็นรายวันในอัตราร้อยละ 0.2 ของสิ่งของที่ยังไม่ได้รับมอบ แต่ต้องไม่ต่ำกว่าวันละ 100.00 บาท</li>
-    <li>6. ส่วนราชการสงวนสิทธิ์ที่จะไม่รับมอบถ้าปรากฏว่าสินค้านั้นมีลักษณะไม่ตรงตามรายการที่ระบุไว้ในใบสั่งซื้อ กรณีนี้ผู้รับจ้างจะต้องดำเนินการเปลี่ยนใหม่ให้ถูกต้องตามใบสั่งซื้อทุกประการ</li>
-    <li>7. ผู้กรณีงานจ้าง ผู้รับจะต้องไม่เอางานทั้งหมดหรือแต่บางส่วนแห่งสัญญานี้ไปจ้างช่วงอีกทอดหนึ่ง เว้นแต่การจ้างช่วงงานแต่บางส่วนที่ได้รับอนุญาตเป็นหนังสือจากผู้ว่าจ้างแล้ว การที่ผู้ว่าจ้างได้อนุญาตให้จ้างช่วงงานแต่บางส่วนดังกล่าวนั้น ไม่เป็นเหตุให้ผู้รับจ้างหลุดพ้นจากความรับผิดหรือพันธะหน้าที่ตามสัญญานี้ และผู้รับจ้างจะยังคงต้องรับผิดในความผิดกรณีผู้รับจ้างไปจ้างช่วงงานแต่บางส่วนโดยฝ่าฝืนความในวรรคหนึ่ง ผู้รับจ้างจะต้องชำระค่าปรับให้แก่ผู้ว่าจ้างเป็นจำนวนในอัตราร้อยละ 10 (สิบ) ของวงเงินของงานที่จ้างช่วงตามสัญญา ทั้งนี้ ไม่ตัดสิทธิผู้ว่าจ้างในการบอกเลิกสัญญา</li>
-    <li>8. การประเมินผลการปฏิบัติงานของผู้ประกอบการ หน่วยงานของรัฐสามารถนำผลการปฏิบัติงานแล้วเสร็จตามสัญญาหรือข้อตกลงของคู่สัญญาเพื่อนำมาประเมินผลการปฏิบัติงานของผู้ประกอบการ</li>
+    <li>1. กำหนดส่งมอบภายใน <strong><span id="cond-span-delivery-days" class="cond-edit-span" contenteditable="true" title="คลิกเพื่อแก้ไขจำนวนวัน">{bill_data['cond_delivery_days']}</span></strong> วัน นับถัดจากวันที่ผู้ขายได้รับใบสั่งซื้อ</li>
+    <li>2. ครบกำหนดส่งมอบวันที่ <span id="cond-span-deadline" class="cond-edit-span" contenteditable="true" title="คลิกเพื่อแก้ไขวันที่ครบกำหนดส่งมอบ" style="color: red; font-weight: bold;">{bill_data['cond_deadline_text']}</span></li>
+    <li>3. สถานที่ส่งมอบ <span id="cond-span-location" class="cond-edit-span" contenteditable="true" title="คลิกเพื่อแก้ไขสถานที่">{bill_data['cond_location']}</span></li>
+    <li>4. ระยะเวลารับประกัน <span id="cond-span-warranty" class="cond-edit-span" contenteditable="true" title="คลิกเพื่อแก้ไขระยะเวลารับประกัน">{bill_data['cond_warranty']}</span></li>
+    <li>5. สงวนสิทธิ์ค่าปรับกรณีส่งมอบเกินกำหนด โดยคิดค่าปรับเป็นรายวันในอัตราร้อยละ <span id="cond-span-rate" class="cond-edit-span" contenteditable="true" title="คลิกเพื่อแก้ไขอัตราค่าปรับ">{bill_data['cond_penalty_rate']}</span> ของสิ่งของที่ยังไม่ได้รับมอบ แต่ต้องไม่ต่ำกว่าวันละ <span id="cond-span-min" class="cond-edit-span" contenteditable="true" title="คลิกเพื่อแก้ไขค่าปรับขั้นต่ำ">{bill_data['cond_penalty_min']}</span> บาท</li>
+    <li>6. <span id="cond-span-6" class="cond-edit-span" contenteditable="true" title="คลิกเพื่อแก้ไขข้อความ">{bill_data['cond_item_6']}</span></li>
+    <li>7. <span id="cond-span-7" class="cond-edit-span" contenteditable="true" title="คลิกเพื่อแก้ไขข้อความ">{bill_data['cond_item_7']}</span></li>
+    <li>8. <span id="cond-span-8" class="cond-edit-span" contenteditable="true" title="คลิกเพื่อแก้ไขข้อความ">{bill_data['cond_item_8']}</span></li>
   </ul>
 
   <div class="signatures-wrap">
@@ -1188,10 +1260,57 @@ def render_printable_bill_html(bill_data):
           </div>
         </div>
       </div>
+
+      <!-- ส่วนที่ 4: เงื่อนไขการสั่งซื้อ (หน้า 2) -->
+      <div class="form-sec-title" id="sec-conditions">
+        <svg class="ic" style="color: #2563eb;"><use href="#ic-edit"/></svg> เงื่อนไขการสั่งซื้อ (หน้าที่ 2)
+      </div>
+      <div class="field-row">
+        <div class="field-group">
+          <label>1. กำหนดส่งมอบภายใน (วัน)</label>
+          <input type="text" id="cfg-cond_delivery_days" value="{bill_data['cond_delivery_days']}">
+        </div>
+        <div class="field-group">
+          <label>2. ครบกำหนดส่งมอบวันที่</label>
+          <input type="text" id="cfg-cond_deadline_text" value="{bill_data['cond_deadline_text']}">
+        </div>
+      </div>
+      <div class="field-row">
+        <div class="field-group">
+          <label>3. สถานที่ส่งมอบ</label>
+          <input type="text" id="cfg-cond_location" value="{bill_data['cond_location']}">
+        </div>
+        <div class="field-group">
+          <label>4. ระยะเวลารับประกัน</label>
+          <input type="text" id="cfg-cond_warranty" value="{bill_data['cond_warranty']}">
+        </div>
+      </div>
+      <div class="field-row">
+        <div class="field-group">
+          <label>5. ค่าปรับรายวัน (ร้อยละ)</label>
+          <input type="text" id="cfg-cond_penalty_rate" value="{bill_data['cond_penalty_rate']}">
+        </div>
+        <div class="field-group">
+          <label>5. ค่าปรับขั้นต่ำ (บาท/วัน)</label>
+          <input type="text" id="cfg-cond_penalty_min" value="{bill_data['cond_penalty_min']}">
+        </div>
+      </div>
+      <div class="field-group">
+        <label>6. เงื่อนไขข้อ 6 (การไม่รับมอบ/เปลี่ยนสินค้า)</label>
+        <textarea id="cfg-cond_item_6" rows="2">{bill_data['cond_item_6']}</textarea>
+      </div>
+      <div class="field-group">
+        <label>7. เงื่อนไขข้อ 7 (การจ้างช่วง/ค่าปรับจ้างช่วง)</label>
+        <textarea id="cfg-cond_item_7" rows="3">{bill_data['cond_item_7']}</textarea>
+      </div>
+      <div class="field-group">
+        <label>8. เงื่อนไขข้อ 8 (การประเมินผลการปฏิบัติงาน)</label>
+        <textarea id="cfg-cond_item_8" rows="2">{bill_data['cond_item_8']}</textarea>
+      </div>
     </div>
     <div class="bill-modal-footer">
       <div style="font-size: 12px; color: #6b7280;">
-        * ข้อมูลที่แก้ไขจะถูกบันทึกและแสดงผลในใบสั่งซื้อทุกวันรวมถึงไฟล์ส่งออก Excel
+        * ข้อมูลที่แก้ไขจะถูกบันทึกและแสดงผลในใบสั่งซื้อรวมถึงไฟล์ส่งออก Excel
       </div>
       <div style="display: flex; gap: 8px;">
         <button class="btn btn-back" onclick="closeBillSettingsModal()">ยกเลิก</button>
@@ -1204,20 +1323,40 @@ def render_printable_bill_html(bill_data):
 </div>
 
 <script>
-function openBillSettingsModal() {{
-  document.getElementById('bill-settings-modal').classList.add('visible');
+function openBillSettingsModal(secId) {{
+  const modal = document.getElementById('bill-settings-modal');
+  modal.classList.add('visible');
+  if (secId) {{
+    setTimeout(() => {{
+      const target = document.getElementById(secId);
+      if (target) {{
+        target.scrollIntoView({{ behavior: 'smooth', block: 'start' }});
+      }}
+    }}, 120);
+  }}
 }}
 function closeBillSettingsModal() {{
   document.getElementById('bill-settings-modal').classList.remove('visible');
 }}
 async function saveBillSettings() {{
-  const dayNum = {bill_data['day_number']};
+  const dayNum = "{bill_data['day_number']}";
   const billNum = document.getElementById('cfg-bill_number').value.trim();
   const orderDateThai = document.getElementById('cfg-order_date_thai').value.trim();
+  const condDeadline = document.getElementById('cfg-cond_deadline_text') ? document.getElementById('cfg-cond_deadline_text').value.trim() : '';
 
   const payload = {{
     [`bill_number_day_${{dayNum}}`]: billNum,
     [`order_date_day_${{dayNum}}`]: orderDateThai,
+    [`cond_deadline_day_${{dayNum}}`]: condDeadline,
+    cond_deadline_text: condDeadline,
+    cond_delivery_days: document.getElementById('cfg-cond_delivery_days') ? document.getElementById('cfg-cond_delivery_days').value.trim() : '',
+    cond_location: document.getElementById('cfg-cond_location') ? document.getElementById('cfg-cond_location').value.trim() : '',
+    cond_warranty: document.getElementById('cfg-cond_warranty') ? document.getElementById('cfg-cond_warranty').value.trim() : '',
+    cond_penalty_rate: document.getElementById('cfg-cond_penalty_rate') ? document.getElementById('cfg-cond_penalty_rate').value.trim() : '',
+    cond_penalty_min: document.getElementById('cfg-cond_penalty_min') ? document.getElementById('cfg-cond_penalty_min').value.trim() : '',
+    cond_item_6: document.getElementById('cfg-cond_item_6') ? document.getElementById('cfg-cond_item_6').value.trim() : '',
+    cond_item_7: document.getElementById('cfg-cond_item_7') ? document.getElementById('cfg-cond_item_7').value.trim() : '',
+    cond_item_8: document.getElementById('cfg-cond_item_8') ? document.getElementById('cfg-cond_item_8').value.trim() : '',
     vendor_name: document.getElementById('cfg-vendor_name').value.trim(),
     vendor_tel: document.getElementById('cfg-vendor_tel').value.trim(),
     vendor_address_line1: document.getElementById('cfg-vendor_address_line1').value.trim(),
@@ -1248,7 +1387,7 @@ async function saveBillSettings() {{
     if (data.success) {{
       await showPopupAlert({{
         title: 'บันทึกข้อมูลสำเร็จ',
-        message: 'บันทึกข้อมูลใบสั่งซื้อ ส่วนราชการ และผู้ลงนามเรียบร้อยแล้ว',
+        message: 'บันทึกข้อมูลใบสั่งซื้อ ส่วนราชการ เงื่อนไข และผู้ลงนามเรียบร้อยแล้ว',
         type: 'success',
         btnText: 'ตกลง'
       }});
@@ -1428,7 +1567,7 @@ window.confirm = function(msg) {{
 }};
 
 // Auto-save inline edits on the page
-const currentDayNum = {bill_data['day_number']};
+const currentDayNum = "{bill_data['day_number']}";
 const billNumEl = document.getElementById('bill-num-display');
 const orderDateEl = document.getElementById('order-date-display');
 
@@ -1457,6 +1596,40 @@ if (orderDateEl) {{
     }});
   }});
 }}
+
+// Auto-save for condition editable spans
+const conditionSpanMap = [
+  {{ id: 'cond-span-delivery-days', key: 'cond_delivery_days', inputId: 'cfg-cond_delivery_days' }},
+  {{ id: 'cond-span-deadline', key: 'cond_deadline_text', dayKey: `cond_deadline_day_${{currentDayNum}}`, inputId: 'cfg-cond_deadline_text' }},
+  {{ id: 'cond-span-location', key: 'cond_location', inputId: 'cfg-cond_location' }},
+  {{ id: 'cond-span-warranty', key: 'cond_warranty', inputId: 'cfg-cond_warranty' }},
+  {{ id: 'cond-span-rate', key: 'cond_penalty_rate', inputId: 'cfg-cond_penalty_rate' }},
+  {{ id: 'cond-span-min', key: 'cond_penalty_min', inputId: 'cfg-cond_penalty_min' }},
+  {{ id: 'cond-span-6', key: 'cond_item_6', inputId: 'cfg-cond_item_6' }},
+  {{ id: 'cond-span-7', key: 'cond_item_7', inputId: 'cfg-cond_item_7' }},
+  {{ id: 'cond-span-8', key: 'cond_item_8', inputId: 'cfg-cond_item_8' }}
+];
+
+conditionSpanMap.forEach(function(item) {{
+  const spanEl = document.getElementById(item.id);
+  if (!spanEl) return;
+  spanEl.addEventListener('blur', async function() {{
+    const val = this.innerText.trim();
+    const inputEl = document.getElementById(item.inputId);
+    if (inputEl) inputEl.value = val;
+    const body = {{ [item.key]: val }};
+    if (item.dayKey) body[item.dayKey] = val;
+    try {{
+      await fetch('/api/bill/settings', {{
+        method: 'POST',
+        headers: {{ 'Content-Type': 'application/json' }},
+        body: JSON.stringify(body)
+      }});
+    }} catch (e) {{
+      console.error('Failed to auto-save condition span:', e);
+    }}
+  }});
+}});
 </script>
 
 </body>
