@@ -7,6 +7,7 @@ import sqlite3
 import datetime
 import os
 from benchmark import load_benchmark_prices_from_excel, DEFAULT_EXCEL_PATH
+from daily_meals import decode_daily_metadata, encode_daily_notes
 
 USE_SUPABASE = os.environ.get("USE_SUPABASE", "false").lower() in ("true", "1", "yes")
 
@@ -21,6 +22,11 @@ def get_connection(db_path=DB_PATH):
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     return conn
+
+def _decode_daily_spec(spec):
+    if spec and spec.get("metadata"):
+        spec["metadata"] = decode_daily_metadata(spec["metadata"])
+    return spec
 
 def init_db(db_path=DB_PATH):
     """Initialize SQLite database tables."""
@@ -201,7 +207,7 @@ def get_daily_purchase_spec(day_number, db_path=DB_PATH):
         try:
             res = supabase_db.sb_get_daily_purchase_spec(day_number)
             if res is not None:
-                return res
+                return _decode_daily_spec(res)
         except Exception as e:
             print(f"[Supabase Fallback] get_daily_purchase_spec: {e}")
 
@@ -214,7 +220,7 @@ def get_daily_purchase_spec(day_number, db_path=DB_PATH):
         conn.close()
         return None
 
-    meta = dict(meta_row)
+    meta = decode_daily_metadata(dict(meta_row))
 
     cur.execute("""
         SELECT id, day_number, item_code, item_name, category, unit, quantity, benchmark_price, subtotal_cost, notes
@@ -244,7 +250,7 @@ def get_daily_purchase_spec(day_number, db_path=DB_PATH):
         "category_summary": cat_summary
     }
 
-def update_daily_purchases(day_number, items_data, theme=None, notes=None, db_path=DB_PATH):
+def update_daily_purchases(day_number, items_data, theme=None, notes=None, db_path=DB_PATH, meal_plan=None):
     """
     Replace the purchase specification for a given day.
     items_data: list of dicts with keys:
@@ -256,7 +262,7 @@ def update_daily_purchases(day_number, items_data, theme=None, notes=None, db_pa
     sb_result = None
     if USE_SUPABASE and supabase_db and supabase_db.is_supabase_configured():
         try:
-            sb_result = supabase_db.sb_update_daily_purchases(day_number, items_data, theme=theme, notes=notes)
+            sb_result = supabase_db.sb_update_daily_purchases(day_number, items_data, theme=theme, notes=notes, meal_plan=meal_plan)
         except Exception as e:
             print(f"[Supabase Fallback] update_daily_purchases: {e}")
 
@@ -264,7 +270,7 @@ def update_daily_purchases(day_number, items_data, theme=None, notes=None, db_pa
     cur = conn.cursor()
 
     # Update metadata if theme or notes provided
-    if theme is not None or notes is not None:
+    if theme is not None or notes is not None or meal_plan:
         updates = []
         vals = []
         if theme is not None:
@@ -272,7 +278,14 @@ def update_daily_purchases(day_number, items_data, theme=None, notes=None, db_pa
             vals.append(theme)
         if notes is not None:
             updates.append("notes = ?")
-            vals.append(notes)
+            cur.execute("SELECT notes FROM daily_metadata WHERE day_number = ?", (day_number,))
+            current_notes = cur.fetchone()
+            vals.append(encode_daily_notes(current_notes[0] if current_notes else "", notes=notes, meal_plan=meal_plan))
+        elif meal_plan:
+            cur.execute("SELECT notes FROM daily_metadata WHERE day_number = ?", (day_number,))
+            current_notes = cur.fetchone()
+            updates.append("notes = ?")
+            vals.append(encode_daily_notes(current_notes[0] if current_notes else "", meal_plan=meal_plan))
         updates.append("updated_at = CURRENT_TIMESTAMP")
         vals.append(day_number)
         cur.execute(f"UPDATE daily_metadata SET {', '.join(updates)} WHERE day_number = ?", tuple(vals))
@@ -309,7 +322,7 @@ def update_daily_purchases(day_number, items_data, theme=None, notes=None, db_pa
 
     conn.commit()
     conn.close()
-    return sb_result if sb_result else get_daily_purchase_spec(day_number, db_path)
+    return _decode_daily_spec(sb_result) if sb_result else get_daily_purchase_spec(day_number, db_path)
 
 def get_365_days_summary(db_path=DB_PATH):
     """
@@ -749,14 +762,14 @@ def reset_all_data_365(db_path=DB_PATH):
         "supabase": sb_result
     }
 
-def update_daily_metadata(day_number, theme=None, notes=None, db_path=DB_PATH):
+def update_daily_metadata(day_number, theme=None, notes=None, db_path=DB_PATH, meal_plan=None):
     """
     Update theme (menu name) and/or notes for a specific day without touching its items.
     """
     sb_result = None
     if USE_SUPABASE and supabase_db and supabase_db.is_supabase_configured():
         try:
-            sb_result = supabase_db.sb_update_daily_metadata(day_number, theme=theme, notes=notes)
+            sb_result = supabase_db.sb_update_daily_metadata(day_number, theme=theme, notes=notes, meal_plan=meal_plan)
         except Exception as e:
             print(f"[Supabase Fallback] update_daily_metadata: {e}")
 
@@ -769,11 +782,18 @@ def update_daily_metadata(day_number, theme=None, notes=None, db_path=DB_PATH):
         vals.append(str(theme).strip())
     if notes is not None:
         updates.append("notes = ?")
-        vals.append(str(notes).strip())
+        cur.execute("SELECT notes FROM daily_metadata WHERE day_number = ?", (day_number,))
+        current_notes = cur.fetchone()
+        vals.append(encode_daily_notes(current_notes[0] if current_notes else "", notes=notes, meal_plan=meal_plan))
+    elif meal_plan:
+        cur.execute("SELECT notes FROM daily_metadata WHERE day_number = ?", (day_number,))
+        current_notes = cur.fetchone()
+        updates.append("notes = ?")
+        vals.append(encode_daily_notes(current_notes[0] if current_notes else "", meal_plan=meal_plan))
     if updates:
         updates.append("updated_at = CURRENT_TIMESTAMP")
         vals.append(day_number)
         cur.execute(f"UPDATE daily_metadata SET {', '.join(updates)} WHERE day_number = ?", tuple(vals))
         conn.commit()
     conn.close()
-    return sb_result if sb_result else get_daily_purchase_spec(day_number, db_path)
+    return _decode_daily_spec(sb_result) if sb_result else get_daily_purchase_spec(day_number, db_path)

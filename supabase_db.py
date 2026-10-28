@@ -11,6 +11,7 @@ import urllib.request
 import urllib.parse
 import urllib.error
 from benchmark import DEFAULT_EXCEL_PATH, save_benchmark_prices_to_excel
+from daily_meals import encode_daily_notes
 
 SUPABASE_URL = os.environ.get("SUPABASE_URL", "https://rqnhbzzenacplynzutkk.supabase.co")
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY", "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJxbmhienplbmFjcGx5bnp1dGtrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTI3NTM0NjcsImV4cCI6MjEwODMyOTQ2N30.hdCWq35q8bB_gFybZceAPd8JYmaGTSoY4_i1nyIjjQY")
@@ -98,12 +99,12 @@ def sb_replace_benchmark_items(items):
         codes = ",".join('"' + str(item["code"]).replace('"', '\\"') + '"' for item in items)
         _api_request("benchmark_items", method="DELETE", params={"code": f"not.in.({codes})"})
     else:
-        _api_request("benchmark_items", method="DELETE")
+        _api_request("benchmark_items", method="DELETE", params={"code": "not.is.null"})
     return len(items)
 
 def sb_clear_benchmark_items():
     """Remove every row from the remote benchmark catalog."""
-    _api_request("benchmark_items", method="DELETE")
+    _api_request("benchmark_items", method="DELETE", params={"code": "not.is.null"})
 
 def sb_create_benchmark_item(data, excel_path=DEFAULT_EXCEL_PATH):
     code = data.get("code", "").strip()
@@ -200,14 +201,9 @@ def sb_get_daily_purchase_spec(day_number):
         "category_summary": cat_summary
     }
 
-def sb_update_daily_purchases(day_number, items_data, theme=None, notes=None):
-    if theme is not None or notes is not None:
-        patch = {}
-        if theme is not None:
-            patch["theme"] = theme
-        if notes is not None:
-            patch["notes"] = notes
-        _api_request("daily_metadata", method="PATCH", data=patch, params={"day_number": f"eq.{day_number}"})
+def sb_update_daily_purchases(day_number, items_data, theme=None, notes=None, meal_plan=None):
+    if theme is not None or notes is not None or meal_plan:
+        sb_update_daily_metadata(day_number, theme=theme, notes=notes, meal_plan=meal_plan)
 
     # Delete existing items for day
     _api_request("daily_purchases", method="DELETE", params={"day_number": f"eq.{day_number}"})
@@ -297,12 +293,14 @@ def sb_reset_all_data_365():
         print(f"[Supabase] reset daily_metadata error: {e}")
     return True
 
-def sb_update_daily_metadata(day_number, theme=None, notes=None):
+def sb_update_daily_metadata(day_number, theme=None, notes=None, meal_plan=None):
     payload = {}
     if theme is not None:
         payload["theme"] = str(theme).strip()
-    if notes is not None:
-        payload["notes"] = str(notes).strip()
+    if notes is not None or meal_plan:
+        current = _api_request("daily_metadata", params={"day_number": f"eq.{day_number}", "select": "notes"}) or []
+        raw_notes = current[0].get("notes", "") if current else ""
+        payload["notes"] = encode_daily_notes(raw_notes, notes=notes, meal_plan=meal_plan)
     if payload:
         _api_request("daily_metadata", method="PATCH", data=payload, params={"day_number": f"eq.{day_number}"})
     return sb_get_daily_purchase_spec(day_number)

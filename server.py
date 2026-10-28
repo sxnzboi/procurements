@@ -420,8 +420,10 @@ class ProcurementHandler(BaseHTTPRequestHandler):
         # แก้ไขเมนูอาหาร / ธีมประจำวัน
         elif path == "/api/day/menu":
             day_num = body.get("day")
-            theme = body.get("theme", "")
-            notes = body.get("notes", "")
+            theme = body.get("theme") if "theme" in body else None
+            notes = body.get("notes") if "notes" in body else None
+            meal_keys = ("breakfast_menu", "lunch_menu", "dinner_menu", "child_count")
+            meal_plan = {key: body[key] for key in meal_keys if key in body}
             template_key = body.get("template_key")
             apply_items = body.get("apply_items", False)
 
@@ -431,15 +433,19 @@ class ProcurementHandler(BaseHTTPRequestHandler):
 
             try:
                 day_num = int(day_num)
+                if "child_count" in meal_plan and str(meal_plan["child_count"]).strip():
+                    meal_plan["child_count"] = int(meal_plan["child_count"])
+                    if meal_plan["child_count"] < 0:
+                        raise ValueError("จำนวนเด็กต้องเป็นเลขศูนย์หรือมากกว่า")
                 if apply_items and template_key and template_key in PROCUREMENT_TEMPLATES:
                     tpl = PROCUREMENT_TEMPLATES[template_key]
                     items_data = [
                         {"item_code": it["code"], "quantity": it["qty"], "notes": it.get("note", "")}
                         for it in tpl["items"]
                     ]
-                    updated = update_daily_purchases(day_num, items_data, theme=theme or tpl["theme"], notes=notes)
+                    updated = update_daily_purchases(day_num, items_data, theme=(theme or tpl["theme"]), notes=notes, meal_plan=meal_plan)
                 else:
-                    updated = update_daily_metadata(day_num, theme=theme, notes=notes)
+                    updated = update_daily_metadata(day_num, theme=theme, notes=notes, meal_plan=meal_plan)
 
                 self._send_json({"success": True, "day": updated})
             except Exception as e:
@@ -792,6 +798,64 @@ body {
   color: var(--primary);
   font-weight: 500;
   margin-top: 3px;
+}
+.meal-plan-editor {
+  margin: 0 0 16px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #f8fafc;
+}
+.meal-plan-heading {
+  margin-bottom: 12px;
+  font-size: 15px;
+  font-weight: 700;
+}
+.meal-plan-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(130px, 1fr));
+  gap: 12px;
+  align-items: end;
+}
+.meal-plan-field label {
+  display: block;
+  margin-bottom: 5px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+}
+.meal-plan-field input,
+.meal-plan-field textarea {
+  width: 100%;
+  min-height: 40px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: #fff;
+  color: var(--text);
+  font: inherit;
+  resize: vertical;
+}
+.daily-meal-summary {
+  width: fit-content;
+  max-width: 100%;
+  margin: 0 auto 6px 0;
+  padding: 12px 16px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #f8fafc;
+  color: var(--danger);
+  font-size: 14px;
+}
+.daily-meal-summary ul { margin: 0; padding-left: 22px; }
+.daily-meal-summary li { padding: 2px 0; }
+.daily-meal-summary .child-count { margin: 8px 0 0; font-weight: 700; color: var(--danger); }
+.daily-info-stack { display: flex; width: 100%; flex-direction: column; align-items: flex-start; margin-bottom: 8px; }
+.daily-info-stack .daily-meal-summary,
+.daily-info-stack .day-navigation { align-self: flex-start; }
+.daily-info-stack .day-navigation { display: flex; justify-content: flex-start; gap: 8px; }
+@media (max-width: 900px) {
+  .meal-plan-grid { grid-template-columns: repeat(2, minmax(130px, 1fr)); }
 }
 .detail-meta {
   display: flex;
@@ -1418,14 +1482,16 @@ body {
               </button>
             </div>
           </div>
-          <!-- ปุ่มเลื่อนวัน -->
-          <div style="display: flex; gap: 8px; margin-bottom: 14px;">
-            <button class="btn btn-outline btn-sm" onclick="loadDay(currentDay - 1)">
-              <svg class="ic"><use href="#ic-chevron-left"/></svg> วันก่อนหน้า
-            </button>
-            <button class="btn btn-outline btn-sm" onclick="loadDay(currentDay + 1)">
-              วันถัดไป <svg class="ic"><use href="#ic-chevron-right"/></svg>
-            </button>
+          <div class="daily-info-stack">
+            <div id="daily-meal-summary" class="daily-meal-summary"></div>
+            <div class="day-navigation">
+              <button class="btn btn-outline btn-sm" onclick="loadDay(currentDay - 1)">
+                <svg class="ic"><use href="#ic-chevron-left"/></svg> วันก่อนหน้า
+              </button>
+              <button class="btn btn-outline btn-sm" onclick="loadDay(currentDay + 1)">
+                วันถัดไป <svg class="ic"><use href="#ic-chevron-right"/></svg>
+              </button>
+            </div>
           </div>
           <table class="items-table" id="detail-items-table">
             <thead>
@@ -1891,7 +1957,7 @@ body {
 
 <!-- ป๊อปอัปแก้ไขเมนูอาหารประจำวัน (MODAL 4: EDIT DAILY MENU MODAL) -->
 <div class="modal-overlay" id="menu-edit-modal">
-  <div class="modal" style="width: 580px; max-width: 95vw;">
+  <div class="modal" style="width: 760px; max-width: 95vw;">
     <div class="modal-header">
       <div class="modal-title">
         <svg class="ic"><use href="#ic-edit"/></svg> แก้ไขเมนูอาหาร — <span id="menu-modal-day-label">วันที่ 1</span>
@@ -1901,6 +1967,27 @@ body {
       </button>
     </div>
     <div class="modal-body" style="padding: 20px 24px;">
+      <div class="meal-plan-editor" style="margin: 0 0 18px;">
+        <div class="meal-plan-heading">เมนูประจำวันและจำนวนเด็ก</div>
+        <div class="meal-plan-grid">
+          <div class="meal-plan-field">
+            <label for="meal-breakfast">เมนูอาหารเช้า</label>
+            <textarea id="meal-breakfast" rows="2" placeholder="พนักงานกรอกเมนูอาหารเช้า"></textarea>
+          </div>
+          <div class="meal-plan-field">
+            <label for="meal-lunch">เมนูอาหารกลางวัน</label>
+            <textarea id="meal-lunch" rows="2" placeholder="พนักงานกรอกเมนูอาหารกลางวัน"></textarea>
+          </div>
+          <div class="meal-plan-field">
+            <label for="meal-dinner">เมนูอาหารเย็น</label>
+            <textarea id="meal-dinner" rows="2" placeholder="พนักงานกรอกเมนูอาหารเย็น"></textarea>
+          </div>
+          <div class="meal-plan-field">
+            <label for="meal-child-count">จำนวนเด็ก</label>
+            <input id="meal-child-count" type="number" min="0" step="1" placeholder="ระบุจำนวนเด็ก">
+          </div>
+        </div>
+      </div>
       <div style="margin-bottom: 16px;">
         <label style="display: block; font-weight: 600; margin-bottom: 6px; font-size: 13.5px; color: #1e293b;">
           ชื่อเมนู / รายการอาหารหลัก (ธีมประจำวัน):
@@ -2407,6 +2494,36 @@ async function loadDay(dayNum) {
 
   document.getElementById('detail-title').textContent = `วันที่ ${dayNum} — ${thaiDateFormatted} (${m.day_of_week})`;
   document.getElementById('detail-theme').textContent = m.theme ? m.theme : '— ยังไม่ได้กำหนดเมนู —';
+  document.getElementById('meal-breakfast').value = m.breakfast_menu || '';
+  document.getElementById('meal-lunch').value = m.lunch_menu || '';
+  document.getElementById('meal-dinner').value = m.dinner_menu || '';
+  document.getElementById('meal-child-count').value = m.child_count || '';
+  const mealSummary = document.getElementById('daily-meal-summary');
+  mealSummary.replaceChildren();
+  const meals = [
+    ['อาหารเช้า', m.breakfast_menu],
+    ['อาหารกลางวัน', m.lunch_menu],
+    ['อาหารเย็น', m.dinner_menu]
+  ].filter(([, value]) => value);
+  if (meals.length) {
+    const list = document.createElement('ul');
+    meals.forEach(([label, value]) => {
+      const item = document.createElement('li');
+      item.textContent = `${label}: ${value}`;
+      list.appendChild(item);
+    });
+    mealSummary.appendChild(list);
+  } else {
+    const empty = document.createElement('div');
+    empty.textContent = 'ยังไม่ได้กรอกเมนูอาหารวันนี้';
+    mealSummary.appendChild(empty);
+  }
+  if (m.child_count !== '' && m.child_count != null) {
+    const count = document.createElement('p');
+    count.className = 'child-count';
+    count.textContent = `จำนวนเด็กวันนี้: ${m.child_count} คน`;
+    mealSummary.appendChild(count);
+  }
   document.getElementById('detail-items-count').textContent = spec.item_count + ' รายการ';
   document.getElementById('detail-total-qty').textContent = spec.total_quantity.toFixed(2) + ' หน่วยรวม';
   document.getElementById('detail-total-cost').textContent = '฿' + spec.total_cost.toFixed(2);
@@ -3099,6 +3216,10 @@ async function openEditMenuModal() {
   document.getElementById('menu-modal-day-label').textContent = thaiFormatted;
   document.getElementById('menu-edit-theme-input').value = m.theme || '';
   document.getElementById('menu-edit-notes-input').value = m.notes || '';
+  document.getElementById('meal-breakfast').value = m.breakfast_menu || '';
+  document.getElementById('meal-lunch').value = m.lunch_menu || '';
+  document.getElementById('meal-dinner').value = m.dinner_menu || '';
+  document.getElementById('meal-child-count').value = m.child_count || '';
   document.getElementById('menu-apply-items-check').checked = false;
   document.getElementById('menu-apply-items-container').style.display = 'none';
 
@@ -3147,6 +3268,13 @@ function onMenuTemplateSelected(key) {
 async function saveDailyMenu() {
   if (!currentDay) return;
 
+  const childValue = document.getElementById('meal-child-count').value.trim();
+  const childCount = childValue === '' ? '' : Number(childValue);
+  if (childValue !== '' && (!Number.isInteger(childCount) || childCount < 0)) {
+    showToast('จำนวนเด็กต้องเป็นเลขศูนย์หรือมากกว่า', 'error');
+    return;
+  }
+
   const theme = document.getElementById('menu-edit-theme-input').value.trim();
   const notes = document.getElementById('menu-edit-notes-input').value.trim();
   const templateKey = document.getElementById('menu-template-select').value;
@@ -3156,6 +3284,10 @@ async function saveDailyMenu() {
     day: currentDay,
     theme: theme,
     notes: notes,
+    breakfast_menu: document.getElementById('meal-breakfast').value.trim(),
+    lunch_menu: document.getElementById('meal-lunch').value.trim(),
+    dinner_menu: document.getElementById('meal-dinner').value.trim(),
+    child_count: childCount,
     template_key: templateKey || null,
     apply_items: applyItems
   };
@@ -3171,11 +3303,12 @@ async function saveDailyMenu() {
     return;
   }
 
-  showToast(`บันทึกเมนูอาหารวันที่ ${currentDay} เรียบร้อยแล้ว!`, 'success');
   closeEditMenuModal();
   await loadDay(currentDay);
   await loadSummary();
   renderCalendar();
+
+  showToast(`บันทึกเมนูอาหารวันที่ ${currentDay} เรียบร้อยแล้ว!`, 'success');
 }
 
 function switchTab(tabName) {

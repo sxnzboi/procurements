@@ -5,7 +5,9 @@ Uses Sarabun / TH Sarabun New font for printing, exact official tables, conditio
 """
 
 import datetime
+import html as html_lib
 from database import get_connection, get_daily_purchase_spec, get_bill_settings, DB_PATH
+from daily_meals import decode_daily_notes
 from xlsx_engine import write_xlsx
 
 THAI_MONTHS = [
@@ -68,6 +70,25 @@ def baht_text(num):
         
     return f"({b_txt}{s_txt})"
 
+
+def _daily_meal_record(day_number, service_date, raw_notes):
+    meals = decode_daily_notes(raw_notes)
+    try:
+        service_date = to_thai_date(
+            datetime.datetime.strptime(service_date, "%Y-%m-%d").date(),
+            include_day_name=True,
+        )
+    except (TypeError, ValueError):
+        pass
+    return {
+        "day_number": day_number,
+        "service_date": service_date,
+        "breakfast_menu": meals.get("breakfast_menu", ""),
+        "lunch_menu": meals.get("lunch_menu", ""),
+        "dinner_menu": meals.get("dinner_menu", ""),
+        "child_count": meals.get("child_count", ""),
+    }
+
 def _extract_conditions(settings, default_deadline, dept_info, day_num_key=None):
     cond_deadline = ""
     if day_num_key:
@@ -129,6 +150,14 @@ def get_bill_data_for_day(day_number, db_path=DB_PATH):
         "deadline_date_thai": deadline_date_thai,
         "theme": meta.get("theme", ""),
         "meal_notes": meta.get("notes", ""),
+        "daily_meals": [{
+            "day_number": day_number,
+            "service_date": to_thai_date(service_date, include_day_name=True),
+            "breakfast_menu": meta.get("breakfast_menu", ""),
+            "lunch_menu": meta.get("lunch_menu", ""),
+            "dinner_menu": meta.get("dinner_menu", ""),
+            "child_count": meta.get("child_count", ""),
+        }],
         "items": items,
         "total_items": spec["item_count"],
         "total_quantity": spec["total_quantity"],
@@ -198,6 +227,12 @@ def get_bill_data_for_month(month_str, db_path=DB_PATH):
         ORDER BY p.item_code ASC
     """, (month_str,))
     items = [dict(r) for r in cur.fetchall()]
+
+    cur.execute("""
+        SELECT day_number, date, notes FROM daily_metadata
+        WHERE SUBSTR(date, 1, 7) = ? ORDER BY day_number
+    """, (month_str,))
+    daily_meals = [_daily_meal_record(r["day_number"], r["date"], r["notes"]) for r in cur.fetchall()]
     conn.close()
 
     subtotal     = round(sum(it["subtotal_cost"] for it in items), 2)
@@ -224,6 +259,7 @@ def get_bill_data_for_month(month_str, db_path=DB_PATH):
         "deadline_date_thai": to_thai_date(start_dt, False),
         "theme":              f"ใบสั่งซื้อรายเดือน{month_label} ({range_meta['day_count']} วัน วัน {start_day}–{end_day})",
         "meal_notes":         f"รายการจัดซื้อรวมเดือน{month_label} (วัน {start_day} ถึง {end_day})",
+        "daily_meals":        daily_meals,
         "items":              items,
         "total_items":        len(items),
         "total_quantity":     round(sum(it["quantity"] for it in items), 2),
@@ -280,6 +316,12 @@ def get_bill_data_for_range(start_day, end_day, db_path=DB_PATH):
     """, (start_day, end_day))
     items = [dict(r) for r in cur.fetchall()]
 
+    cur.execute("""
+        SELECT day_number, date, notes FROM daily_metadata
+        WHERE day_number BETWEEN ? AND ? ORDER BY day_number
+    """, (start_day, end_day))
+    daily_meals = [_daily_meal_record(r["day_number"], r["date"], r["notes"]) for r in cur.fetchall()]
+
     subtotal = round(sum(it["subtotal_cost"] for it in items), 2)
     baht_wording = baht_text(subtotal)
 
@@ -300,6 +342,7 @@ def get_bill_data_for_range(start_day, end_day, db_path=DB_PATH):
         "deadline_date_thai": to_thai_date(start_dt, False),
         "theme": f"รายการรวม {range_meta['day_count']} วัน",
         "meal_notes": f"รายการจัดซื้อรวม วันที่ {start_day} ถึง {end_day}",
+        "daily_meals": daily_meals,
         "items": items,
         "total_items": len(items),
         "total_quantity": round(sum(it["quantity"] for it in items), 2),
@@ -356,6 +399,14 @@ def render_printable_bill_html(bill_data):
 
     def make_rows(chunk, start_idx=0):
         rows = []
+        if not chunk:
+            return """
+        <tr class="note-entry-row">
+          <td class="col-no"></td><td class="col-name"></td>
+          <td class="col-qty"></td><td class="col-unit"></td>
+          <td class="col-price"></td><td class="col-subtotal"></td>
+          <td class="col-remark"><textarea class="remark-input" rows="1" aria-label="พิมพ์หมายเหตุ" placeholder="คลิกเพื่อพิมพ์หมายเหตุ" title="คลิกแล้วพิมพ์หมายเหตุได้โดยตรง"></textarea></td>
+        </tr>"""
         for i, it in enumerate(chunk):
             idx = start_idx + i
             no_str   = str(idx + 1)
@@ -372,7 +423,7 @@ def render_printable_bill_html(bill_data):
           <td class="col-unit">{unit_str}</td>
           <td class="col-price">{price_str}</td>
           <td class="col-subtotal">{subtotal_str}</td>
-          <td class="col-remark"></td>
+          <td class="col-remark"><textarea class="remark-input" rows="1" aria-label="พิมพ์หมายเหตุ" placeholder="คลิกเพื่อพิมพ์หมายเหตุ" title="คลิกแล้วพิมพ์หมายเหตุได้โดยตรง">{html_lib.escape(str(it.get('notes') or ''))}</textarea></td>
         </tr>""")
         return "".join(rows)
 
@@ -419,7 +470,7 @@ def render_printable_bill_html(bill_data):
       </tr>""" if is_last_on_page1 else ""
 
     page1_html = f"""<!-- PAGE 1: ใบสั่งซื้อ -->
-<div class="page">
+<div class="page" contenteditable="true" spellcheck="false" title="คลิกข้อความหรือข้อมูลบนเอกสารเพื่อแก้ไขก่อนพิมพ์หรือบันทึก PDF">
   <div class="header-title">ใบสั่งซื้อ</div>
 
   <div class="info-grid">
@@ -444,7 +495,7 @@ def render_printable_bill_html(bill_data):
     </div>
   </div>
 
-  <div class="intro-text">
+  <div class="intro-text" contenteditable="true" spellcheck="false" title="คลิกเพื่อแก้ไขข้อความเกริ่น">
     ตามที่ท่านได้เสนอราคาวัสดุอาหารและเครื่องอุปโภค บริโภค ปีงบประมาณ {bill_data['fiscal_year']} ให้นำวัสดุส่งมอบให้{bill_data['dept_name']} ตามรายการดังต่อไปนี้
   </div>
 
@@ -477,7 +528,7 @@ def render_printable_bill_html(bill_data):
       </tr>""" if is_last else ""
         cont_pages_html += f"""
 <!-- ต่อหน้า {pi} -->
-<div class="page page-break">
+<div class="page page-break" contenteditable="true" spellcheck="false" title="คลิกข้อความหรือข้อมูลบนเอกสารเพื่อแก้ไขก่อนพิมพ์หรือบันทึก PDF">
   <div class="page-num">- {pi} - (ต่อ)</div>
   <div style="font-size: 13pt; margin-bottom: 6px; color: #555;">ใบสั่งซื้อเลขที่ {bill_data['bill_number']} (ต่อ)</div>
   {make_table_header()}
@@ -544,6 +595,7 @@ def render_printable_bill_html(bill_data):
     align-items: center;
     flex-wrap: wrap;
   }}
+  .edit-hint {{ color: #1d4ed8; font-size: 12px; font-weight: 600; }}
   .btn {{
     display: inline-flex;
     align-items: center;
@@ -876,6 +928,7 @@ def render_printable_bill_html(bill_data):
     padding: 15mm 15mm 15mm 15mm;
     position: relative;
   }}
+  .page[contenteditable="true"] {{ cursor: text; outline: none; user-select: text; }}
   .header-title {{
     text-align: center;
     font-size: 22pt;
@@ -933,6 +986,9 @@ def render_printable_bill_html(bill_data):
   .col-price {{ width: 68px; text-align: right; }}
   .col-subtotal {{ width: 85px; text-align: right; }}
   .col-remark {{ width: 175px; text-align: left; font-size: 12pt; padding-left: 6px !important; }}
+  .remark-input {{ display: block; width: 100%; min-height: 28px; padding: 2px 4px; border: 0; border-bottom: 1px dashed #2563eb; border-radius: 0; outline: none; background: transparent; color: #000; font: inherit; line-height: 1.2; resize: vertical; cursor: text; user-select: text; pointer-events: auto; }}
+  .remark-input:focus {{ background: #eff6ff; box-shadow: inset 0 0 0 1px #2563eb; }}
+  .remark-input::placeholder {{ color: #9ca3af; font-size: 10pt; opacity: 1; }}
   
   table.bill-table tr.table-foot td {{
     border-top: 1px solid #000000 !important;
@@ -1036,9 +1092,7 @@ def render_printable_bill_html(bill_data):
       border-top: none !important;
       border-bottom: none !important;
     }}
-    .col-remark * {{
-      display: none !important;
-    }}
+    .remark-input {{ min-height: 20px; padding: 0; border: none !important; border-radius: 0; background: transparent !important; box-shadow: none !important; resize: none; overflow: visible; color: #000; }}
     #bill-num-display, #order-date-display {{
       border-bottom: none !important;
     }}
@@ -1066,9 +1120,7 @@ def render_printable_bill_html(bill_data):
     <span>ใบสั่งซื้อทางการ (ราชการ) — {bill_data['bill_number']}</span>
   </div>
   <div class="bar-actions">
-    <button onclick="openBillSettingsModal()" class="btn btn-edit">
-      <svg class="ic"><use href="#ic-edit"/></svg> แก้ไขข้อมูลใบสั่งซื้อ / ผู้ลงนาม
-    </button>
+    <span class="edit-hint no-print">คลิกข้อความบนเอกสารเพื่อแก้ไข</span>
     <button onclick="window.print()" class="btn btn-print">
       <svg class="ic"><use href="#ic-printer"/></svg> พิมพ์ใบสั่งซื้อ (Print / Save PDF)
     </button>
@@ -1085,14 +1137,11 @@ def render_printable_bill_html(bill_data):
 {cont_pages_html}
 
 <!-- PAGE 2 (เงื่อนไขและลายมือชื่อ): Always last page -->
-<div class="page page-break">
+<div class="page page-break" contenteditable="true" spellcheck="false" title="คลิกข้อความหรือข้อมูลบนเอกสารเพื่อแก้ไขก่อนพิมพ์หรือบันทึก PDF">
   <div class="page-num">- {len(page_chunks) + 1} -</div>
 
   <div class="conditions-title" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
     <span>อยู่ภายใต้เงื่อนไขต่อไปนี้</span>
-    <button onclick="openBillSettingsModal('sec-conditions')" class="btn btn-edit no-print" style="padding: 3px 10px; font-size: 13px;">
-      <svg class="ic"><use href="#ic-edit"/></svg> แก้ไขเงื่อนไข
-    </button>
   </div>
 
   <ul class="condition-list">
@@ -1672,8 +1721,29 @@ def export_bill_to_xlsx(bill_data, output_path):
         ["จำนวนเงินตัวอักษร", bill_data["baht_text"]]
     ]
 
+    daily_meal_rows = [["วันที่ในรอบปี", "วันที่", "อาหารเช้า", "อาหารกลางวัน", "อาหารเย็น", "จำนวนเด็ก"]]
+    for meal in bill_data.get("daily_meals", []):
+        daily_meal_rows.append([
+            meal.get("day_number", ""),
+            meal.get("service_date", ""),
+            meal.get("breakfast_menu", ""),
+            meal.get("lunch_menu", ""),
+            meal.get("dinner_menu", ""),
+            meal.get("child_count", ""),
+        ])
+
+    # Put the meal details in the first worksheet too, so they are visible
+    # immediately when Excel opens the exported workbook.
+    rows = [["ข้อมูลเมนูประจำวัน"], *daily_meal_rows, [], *rows]
+    item_header_row = len(daily_meal_rows) + 3
+
     write_xlsx(output_path, {
         "รายการจัดซื้อ": rows,
-        "ข้อมูลใบสั่งซื้อ": summary_rows
+        "ข้อมูลใบสั่งซื้อ": summary_rows,
+        "เมนูประจำวัน": daily_meal_rows,
+    }, header_rows={
+        "รายการจัดซื้อ": [1, 2, item_header_row],
+        "ข้อมูลใบสั่งซื้อ": [1],
+        "เมนูประจำวัน": [1],
     })
     return output_path

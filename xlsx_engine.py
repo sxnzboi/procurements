@@ -28,7 +28,7 @@ def _col_index(col_str):
         result = result * 26 + (ord(char) - ord('A') + 1)
     return result - 1
 
-def write_xlsx(filepath, sheets_data):
+def write_xlsx(filepath, sheets_data, header_rows=None):
     """
     Write an Excel .xlsx workbook.
     sheets_data: dict of {sheet_name: [ [cell, cell, ...], [row2...], ... ]}
@@ -54,6 +54,7 @@ def write_xlsx(filepath, sheets_data):
 
     sheet_xmls = {}
     sheet_names = list(sheets_data.keys())
+    header_rows = header_rows or {}
 
     for sheet_idx, (name, rows) in enumerate(sheets_data.items(), start=1):
         # Build worksheet XML
@@ -81,8 +82,9 @@ def write_xlsx(filepath, sheets_data):
         ws_lines.append('  </cols>')
         ws_lines.append('  <sheetData>')
 
+        styled_header_rows = set(header_rows.get(name, [1]))
         for r_idx, row in enumerate(rows, start=1):
-            is_header = (r_idx == 1)
+            is_header = (r_idx in styled_header_rows)
             row_ht = '22' if is_header else '19'
             ws_lines.append(f'    <row r="{r_idx}" ht="{row_ht}" customHeight="1">')
             for c_idx, val in enumerate(row):
