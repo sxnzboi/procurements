@@ -85,6 +85,22 @@ def sb_get_benchmark_item(code):
     res = _api_request("benchmark_items", params={"code": f"eq.{code}", "select": "*"})
     return res[0] if res else None
 
+def sb_replace_benchmark_items(items):
+    """Replace the remote catalog contents while preserving stable item codes."""
+    if items:
+        _api_request(
+            "benchmark_items",
+            method="POST",
+            data=items,
+            params={"on_conflict": "code"},
+            extra_headers={"Prefer": "resolution=merge-duplicates,return=minimal"},
+        )
+        codes = ",".join('"' + str(item["code"]).replace('"', '\\"') + '"' for item in items)
+        _api_request("benchmark_items", method="DELETE", params={"code": f"not.in.({codes})"})
+    else:
+        _api_request("benchmark_items", method="DELETE")
+    return len(items)
+
 def sb_create_benchmark_item(data, excel_path=DEFAULT_EXCEL_PATH):
     code = data.get("code", "").strip()
     name = data.get("name", "").strip()

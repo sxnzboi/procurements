@@ -138,6 +138,8 @@ def init_empty_365_days(db_path=DB_PATH):
 def sync_benchmark_from_excel(excel_path=DEFAULT_EXCEL_PATH, db_path=DB_PATH):
     """Sync fixed benchmark prices from Excel into SQLite."""
     items = load_benchmark_prices_from_excel(excel_path)
+    if USE_SUPABASE and supabase_db and supabase_db.is_supabase_configured():
+        return supabase_db.sb_replace_benchmark_items(items)
     conn = get_connection(db_path)
     cur = conn.cursor()
 
