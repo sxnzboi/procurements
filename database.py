@@ -512,6 +512,20 @@ def delete_benchmark_item(code, excel_path=DEFAULT_EXCEL_PATH, db_path=DB_PATH):
     save_benchmark_prices_to_excel(all_items, excel_path)
     return True
 
+def clear_benchmark_catalog(excel_path=DEFAULT_EXCEL_PATH, db_path=DB_PATH):
+    """Clear the benchmark catalog from its active database and Excel cache."""
+    if USE_SUPABASE and supabase_db and supabase_db.is_supabase_configured():
+        supabase_db.sb_clear_benchmark_items()
+
+    conn = get_connection(db_path)
+    cur = conn.cursor()
+    cur.execute("DELETE FROM benchmark_items")
+    conn.commit()
+    conn.close()
+
+    save_benchmark_prices_to_excel([], excel_path)
+    return True
+
 def delete_daily_purchase_item(purchase_id, db_path=DB_PATH):
     """Delete a single purchase item from a day's schedule."""
     if USE_SUPABASE and supabase_db and supabase_db.is_supabase_configured():

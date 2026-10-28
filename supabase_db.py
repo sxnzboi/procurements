@@ -101,6 +101,10 @@ def sb_replace_benchmark_items(items):
         _api_request("benchmark_items", method="DELETE")
     return len(items)
 
+def sb_clear_benchmark_items():
+    """Remove every row from the remote benchmark catalog."""
+    _api_request("benchmark_items", method="DELETE")
+
 def sb_create_benchmark_item(data, excel_path=DEFAULT_EXCEL_PATH):
     code = data.get("code", "").strip()
     name = data.get("name", "").strip()

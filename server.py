@@ -14,7 +14,7 @@ from urllib.parse import urlparse, parse_qs
 from database import (
     init_db, init_empty_365_days, sync_benchmark_from_excel, get_all_benchmark_items,
     get_benchmark_item, update_benchmark_item, create_benchmark_item,
-    delete_benchmark_item, delete_daily_purchase_item,
+    delete_benchmark_item, clear_benchmark_catalog, delete_daily_purchase_item,
     get_daily_purchase_spec, update_daily_purchases,
     get_365_days_summary, get_bill_settings, update_bill_settings,
     clear_month_purchases, clear_day_purchases, update_daily_metadata, reset_all_data_365, get_connection, DB_PATH
@@ -316,6 +316,13 @@ class ProcurementHandler(BaseHTTPRequestHandler):
             try:
                 delete_benchmark_item(code)
                 self._send_json({"success": True, "code": code})
+            except Exception as e:
+                self._send_json({"error": str(e)}, 400)
+
+        elif path == "/api/benchmark/clear":
+            try:
+                clear_benchmark_catalog()
+                self._send_json({"success": True})
             except Exception as e:
                 self._send_json({"error": str(e)}, 400)
 
@@ -1463,6 +1470,9 @@ body {
             </button>
             <button class="btn btn-warning-outline btn-sm" onclick="document.getElementById('excel-upload-input').click()">
               <svg class="ic"><use href="#ic-upload"/></svg> อัปโหลดไฟล์ Excel
+            </button>
+            <button class="btn btn-danger-outline btn-sm" onclick="clearBenchmarkCatalog()">
+              <svg class="ic"><use href="#ic-trash"/></svg> ล้างข้อมูลทั้งหมด
             </button>
             <button class="btn btn-outline btn-sm" onclick="downloadBenchmark()">
               <svg class="ic"><use href="#ic-download"/></svg> ดาวน์โหลดไฟล์ Excel
@@ -2726,6 +2736,35 @@ async function deleteBenchmarkItem(code, name) {
   if (currentDay) await loadDay(currentDay);
 }
 
+async function clearBenchmarkCatalog() {
+  if (!benchmarkItems.length) {
+    showToast('แคตตาล็อกราคากลางว่างอยู่แล้ว', 'info');
+    return;
+  }
+  const ok = await showPopupConfirm({
+    title: 'ยืนยันการล้างแคตตาล็อกราคากลาง',
+    message: `ต้องการลบวัตถุดิบทั้งหมด ${benchmarkItems.length} รายการออกจากแคตตาล็อกราคากลางและไฟล์ Excel ใช่หรือไม่?\n\nการกระทำนี้ไม่สามารถย้อนกลับได้`,
+    confirmText: 'ล้างข้อมูลทั้งหมด',
+    cancelText: 'ยกเลิก',
+    isDanger: true
+  });
+  if (!ok) return;
+
+  const res = await api('/api/benchmark/clear', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: '{}'
+  });
+  if (res && res.error) {
+    showToast('เกิดข้อผิดพลาดในการล้างแคตตาล็อก: ' + res.error, 'error');
+    return;
+  }
+  showToast('ล้างแคตตาล็อกราคากลางเรียบร้อยแล้ว', 'success');
+  await loadBenchmark();
+  await loadSummary();
+  if (currentDay) await loadDay(currentDay);
+}
+
 function deleteCurrentBenchmarkItem() {
   const code = document.getElementById('bm-code').value.trim();
   const name = document.getElementById('bm-name').value.trim();
@@ -3166,8 +3205,12 @@ def run_server(port=PORT):
 
     init_empty_365_days()
 
-    count = sync_benchmark_from_excel()
-    print(f"[OK] ซิงค์รายการวัตถุดิบ {count} รายการจาก Excel")
+    if os.environ.get("USE_SUPABASE", "false").lower() in ("true", "1", "yes"):
+        count = len(get_all_benchmark_items())
+        print(f"[OK] โหลดรายการวัตถุดิบ {count} รายการจาก Supabase")
+    else:
+        count = sync_benchmark_from_excel()
+        print(f"[OK] ซิงค์รายการวัตถุดิบ {count} รายการจาก Excel")
 
     from database import get_connection
     conn = get_connection()
